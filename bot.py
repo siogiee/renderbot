@@ -2,9 +2,6 @@
 # - Jakarta timezone support
 # - /hariini, /mingguini, /bulanini commands
 
-from pathlib import Path
-
-updated_code = f"""
 import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
