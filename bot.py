@@ -10,7 +10,7 @@ import os
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
 client = gspread.authorize(creds)
-sheet = client.open("Catatan Keuangan").sheet1  # Ganti dengan nama sheet kamu
+sheet = client.open("Catatan Dompet").sheet1  # Ganti dengan nama sheet kamu
 
 # Logging
 logging.basicConfig(level=logging.INFO)
