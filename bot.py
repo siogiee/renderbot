@@ -1,85 +1,49 @@
-import os
-import telebot
-import datetime
+import logging
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import gspread
-from google.oauth2.service_account import Credentials
-from flask import Flask, request
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+import os
 
-app = Flask(__name__)
-bot = telebot.TeleBot(os.environ['TELEGRAM_BOT_TOKEN'])
-
-scope = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
-creds = Credentials.from_service_account_file("credentials.json", scopes=scope)
+# Setup Google Sheets
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
 client = gspread.authorize(creds)
+sheet = client.open("Catatan Dompet").sheet1  # Ganti dengan nama sheet kamu
 
-SHEET_NAME = "Catatan Dompet"
-SHEET_TAB = "Sheet1"
+# Logging
+logging.basicConfig(level=logging.INFO)
 
-sheet = client.open(SHEET_NAME).worksheet(SHEET_TAB)
+# Bot Logic
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Halo! Kirim pengeluaranmu dengan format: Keterangan, Jumlah\nContoh: Ayam Goreng, 20000")
 
-def parse_message(message):
-    try:
-        parts = message.split(',')
-        if len(parts) != 2:
-            return None, None
-        keterangan = parts[0].strip()
-        jumlah = int(parts[1].strip())
-        return keterangan, jumlah
-    except:
-        return None, None
-
-def calculate_total():
-    records = sheet.get_all_values()[1:]  # skip header
-    total = 0
-    for row in records:
-        try:
-            jumlah_str = row[2]  # kolom ke-3 = 'Jumlah'
-            jumlah = (
-                str(jumlah_str)
-                .replace("Rp", "")
-                .replace(".", "")
-                .replace(",", "")
-                .strip()
-            )
-            total += int(jumlah)
-        except Exception as e:
-            print(f"Error parsing jumlah: {e}")
-            continue
-    return total
-
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    text = message.text
-    keterangan, jumlah = parse_message(text)
-    if keterangan is None or jumlah is None:
-        bot.reply_to(message, "Format salah. Gunakan format: Keterangan, Jumlah")
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if "," not in text:
+        await update.message.reply_text("Format salah. Gunakan format: Keterangan, Jumlah")
         return
 
-    tanggal = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    sheet.append_row([tanggal, keterangan, jumlah])
+    try:
+        keterangan, jumlah = map(str.strip, text.split(",", 1))
+        jumlah = int(jumlah.replace(".", "").replace(",", ""))
+        tanggal = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sheet.append_row([tanggal, keterangan, jumlah])
 
-    total = calculate_total()
-    formatted = f"Rp{jumlah:,.0f}".replace(",", ".")
-    formatted_total = f"Rp{total:,.0f}".replace(",", ".")
+        records = sheet.get_all_records()
+        total = sum([r['Jumlah'] for r in records if isinstance(r['Jumlah'], int)])
+        await update.message.reply_text(f"Tercatat: {keterangan} - Rp{jumlah:,}\nTotal pengeluaran: Rp{total:,}")
+    except Exception as e:
+        await update.message.reply_text(f"Terjadi error: {e}")
 
-    bot.reply_to(
-        message,
-        f"Tercatat: {keterangan} - {formatted}\nTotal pengeluaran: {formatted_total}"
-    )
-
-@app.route("/" + os.environ['TELEGRAM_BOT_TOKEN'], methods=['POST'])
-def webhook():
-    json_string = request.get_data().decode('utf-8')
-    update = telebot.types.Update.de_json(json_string)
-    bot.process_new_updates([update])
-    return '', 200
-
-@app.route('/')
-def index():
-    return "Bot aktif!"
-
+# Main
 if __name__ == "__main__":
-    app.run(debug=True)
+    TOKEN = os.environ.get("BOT_TOKEN")  # Ambil dari environment variable di Render
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    print("Bot jalan...")
+    app.run_polling()
