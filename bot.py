@@ -5,11 +5,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 from flask import Flask, request
 
-# Inisialisasi Flask dan Telegram Bot
 app = Flask(__name__)
 bot = telebot.TeleBot(os.environ['TELEGRAM_BOT_TOKEN'])
 
-# Autentikasi Google Sheets
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
@@ -17,7 +15,6 @@ scope = [
 creds = Credentials.from_service_account_file("credentials.json", scopes=scope)
 client = gspread.authorize(creds)
 
-# Ganti dengan nama spreadsheet dan sheet kamu
 SHEET_NAME = "Catatan Dompet"
 SHEET_TAB = "Sheet1"
 
@@ -35,15 +32,21 @@ def parse_message(message):
         return None, None
 
 def calculate_total():
-    records = sheet.get_all_records()
+    records = sheet.get_all_values()[1:]  # skip header
     total = 0
-    for r in records:
+    for row in records:
         try:
-            jumlah = r['Jumlah']
-            if isinstance(jumlah, str):
-                jumlah = jumlah.replace("Rp", "").replace(",", "").replace(".", "")
+            jumlah_str = row[2]  # kolom ke-3 = 'Jumlah'
+            jumlah = (
+                str(jumlah_str)
+                .replace("Rp", "")
+                .replace(".", "")
+                .replace(",", "")
+                .strip()
+            )
             total += int(jumlah)
-        except:
+        except Exception as e:
+            print(f"Error parsing jumlah: {e}")
             continue
     return total
 
@@ -67,7 +70,6 @@ def handle_message(message):
         f"Tercatat: {keterangan} - {formatted}\nTotal pengeluaran: {formatted_total}"
     )
 
-# Endpoint webhook (untuk Render)
 @app.route("/" + os.environ['TELEGRAM_BOT_TOKEN'], methods=['POST'])
 def webhook():
     json_string = request.get_data().decode('utf-8')
