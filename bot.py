@@ -13,7 +13,8 @@ import os
 
 # Setup Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+credentials_json = os.environ["GOOGLE_CREDENTIALS"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(credentials_json), scope)
 client = gspread.authorize(creds)
 sheet = client.open("Catatan Dompet").sheet1  # Ganti dengan nama sheet kamu
 
