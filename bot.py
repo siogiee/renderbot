@@ -16,89 +16,118 @@ import json
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 credentials_json = os.environ["GOOGLE_CREDENTIALS"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(credentials_json), scope)
-client = gspread.authorize(creds)
-sheet = client.open("Catatan Dompet").sheet1  # Ganti dengan nama sheet kamu
+
+gc = gspread.authorize(creds)
+sheet = gc.open_by_key(os.environ["SHEET_ID"]).worksheet(os.environ["WORKSHEET_NAME"])
 
 # Logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
-# Timezone Jakarta
+# Timezone
 tz = pytz.timezone("Asia/Jakarta")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Kirim pengeluaranmu dengan format: Keterangan, Jumlah\\nContoh: Ayam Goreng, 20000")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    if "," not in text:
-        await update.message.reply_text("Format salah. Gunakan format: Keterangan, Jumlah")
-        return
-
-    try:
-        keterangan, jumlah_str = [x.strip() for x in text.split(",", 1)]
-        jumlah = int(jumlah_str)
-        tanggal = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
-
-        sheet.append_row([tanggal, keterangan, jumlah])
-
-        # Ambil total pengeluaran hari ini
-        records = sheet.get_all_records()
-        total = sum(
-            row["Jumlah"] for row in records
-            if row["Tanggal"].startswith(datetime.now(tz).strftime("%Y-%m-%d"))
-        )
-
-        jumlah_rp = f"Rp{jumlah:,}".replace(",", ".")
-        total_rp = f"Rp{total:,}".replace(",", ".")
-
-        await update.message.reply_text(f"Tercatat: {keterangan} - {jumlah_rp}\\nTotal pengeluaran: {total_rp}")
-    except Exception as e:
-        await update.message.reply_text("Terjadi kesalahan saat memproses data.")
-
-async def laporan_hariini(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tanggal_hariini = datetime.now(tz).strftime("%Y-%m-%d")
+# Hitung saldo sekarang
+def get_balance():
     records = sheet.get_all_records()
-    total = sum(
-        row["Jumlah"] for row in records
-        if row["Tanggal"].startswith(tanggal_hariini)
-    )
-    total_rp = f"Rp{total:,}".replace(",", ".")
-    await update.message.reply_text(f"Total pengeluaran hari ini: {total_rp}")
+    income = sum(row["Jumlah"] for row in records if row.get("Tipe", "").lower() == "pemasukan")
+    spending = sum(row["Jumlah"] for row in records if row.get("Tipe", "").lower() == "pengeluaran")
+    return income - spending
 
-async def laporan_mingguini(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    sekarang = datetime.now(tz)
-    awal_minggu = sekarang - timedelta(days=sekarang.weekday())
+# Hitung pemasukan & pengeluaran dari tanggal tertentu
+def get_summary(start_date):
     records = sheet.get_all_records()
-    total = 0
+    income = spending = 0
     for row in records:
         try:
-            waktu = datetime.strptime(row["Tanggal"], "%Y-%m-%d %H:%M:%S")
-            waktu = tz.localize(waktu)
-            if waktu >= awal_minggu:
-                total += row["Jumlah"]
+            row_date = datetime.strptime(row["Tanggal"], "%d/%m/%Y").date()
+            if row_date >= start_date:
+                if row["Tipe"].lower() == "pemasukan":
+                    income += row["Jumlah"]
+                elif row["Tipe"].lower() == "pengeluaran":
+                    spending += row["Jumlah"]
         except:
-            pass
-    total_rp = f"Rp{total:,}".replace(",", ".")
-    await update.message.reply_text(f"Total pengeluaran minggu ini: {total_rp}")
+            continue
+    return income, spending
 
-async def laporan_bulanini(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    sekarang = datetime.now(tz)
-    bulan_ini = sekarang.strftime("%Y-%m")
-    records = sheet.get_all_records()
-    total = sum(
-        row["Jumlah"] for row in records
-        if row["Tanggal"].startswith(bulan_ini)
+# Handler pesan utama
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    now = datetime.now(tz)
+    tanggal = now.strftime("%d/%m/%Y")
+
+    try:
+        if ";" in text:
+            # Pemasukan
+            nama, jumlah = text.split(";")
+            tipe = "Pemasukan"
+        elif "," in text:
+            # Pengeluaran
+            nama, jumlah = text.split(",")
+            tipe = "Pengeluaran"
+        else:
+            await update.message.reply_text("Format tidak dikenali. Gunakan ',' untuk pengeluaran dan ';' untuk pemasukan.")
+            return
+
+        nama = nama.strip()
+        jumlah = int(jumlah.strip())
+
+        sheet.append_row([tanggal, nama, jumlah, tipe])
+        saldo = get_balance()
+
+        response = f"✅ {tipe} sebesar Rp{jumlah:,.0f} dicatat sebagai *{nama}*.\n💰 Saldo saat ini: Rp{saldo:,.0f}"
+        await update.message.reply_text(response, parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"Terjadi kesalahan: {e}")
+
+# Start command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Halo! Kirim pesan seperti:\n"
+        "- `Ayam Geprek, 20000` untuk pengeluaran\n"
+        "- `Gajian; 12000000` untuk pemasukan\n\n"
+        "Perintah lain:\n"
+        "/saldo - Cek saldo\n"
+        "/harian - Ringkasan hari ini\n"
+        "/mingguan - Ringkasan minggu ini\n"
+        "/bulanan - Ringkasan bulan ini",
+        parse_mode="Markdown"
     )
-    total_rp = f"Rp{total:,}".replace(",", ".")
-    await update.message.reply_text(f"Total pengeluaran bulan ini: {total_rp}")
 
-if __name__ == '__main__':
-    app = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN")).build()
+# Perintah tambahan
+async def check_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    saldo = get_balance()
+    await update.message.reply_text(f"💰 Saldo saat ini: Rp{saldo:,.0f}")
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("hariini", laporan_hariini))
-    app.add_handler(CommandHandler("mingguini", laporan_mingguini))
-    app.add_handler(CommandHandler("bulanini", laporan_bulanini))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+async def summary_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    today = datetime.now(tz).date()
+    income, spending = get_summary(today)
+    await update.message.reply_text(
+        f"📅 Ringkasan Hari Ini:\n📥 Pemasukan: Rp{income:,.0f}\n📤 Pengeluaran: Rp{spending:,.0f}"
+    )
 
-    app.run_polling()
+async def summary_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    today = datetime.now(tz).date()
+    start_of_week = today - timedelta(days=today.weekday())
+    income, spending = get_summary(start_of_week)
+    await update.message.reply_text(
+        f"🗓️ Ringkasan Mingguan:\n📥 Pemasukan: Rp{income:,.0f}\n📤 Pengeluaran: Rp{spending:,.0f}"
+    )
+
+async def summary_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    today = datetime.now(tz).date()
+    start_of_month = today.replace(day=1)
+    income, spending = get_summary(start_of_month)
+    await update.message.reply_text(
+        f"📆 Ringkasan Bulanan:\n📥 Pemasukan: Rp{income:,.0f}\n📤 Pengeluaran: Rp{spending:,.0f}"
+    )
+
+# Jalankan Bot
+app = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("saldo", check_balance))
+app.add_handler(CommandHandler("harian", summary_today))
+app.add_handler(CommandHandler("mingguan", summary_week))
+app.add_handler(CommandHandler("bulanan", summary_month))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+app.run_polling()
