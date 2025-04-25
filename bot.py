@@ -53,7 +53,7 @@ def get_summary(start_date):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     now = datetime.now(tz)
-    tanggal = now.strftime("%Y-%m-%d %H:%M:%S")
+    tanggal = now.strftime("%Y-%m-%d")
 
     try:
         if ";" in text:
