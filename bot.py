@@ -39,7 +39,7 @@ def get_summary(start_date):
     income = spending = 0
     for row in records:
         try:
-            row_date = datetime.strptime(row["Tanggal"], "%d/%m/%Y").date()
+            row_date = datetime.strptime(row["Tanggal"], "%Y-%m-%d %H:%M:%S").date()
             if row_date >= start_date:
                 if row["Tipe"].lower() == "pemasukan":
                     income += row["Jumlah"]
@@ -53,7 +53,7 @@ def get_summary(start_date):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     now = datetime.now(tz)
-    tanggal = now.strftime("%d/%m/%Y")
+    tanggal = now.strftime("%Y-%m-%d %H:%M:%S")
 
     try:
         if ";" in text:
